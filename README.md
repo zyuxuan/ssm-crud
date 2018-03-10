@@ -1,6 +1,32 @@
 # ssm-crud
 ---
 
+## 总体的设计思路：
+
+（1）总体功能点：
+
+①分页
+
+②数据校验（jquery前端校验+JSR303后端校验）
+
+③ajax
+
+④Restful的URI：使用HTTP协议请求方式的动词来表示对资源的操作（GET--查询,POST--新增,PUT--修改,DELETE--删除）
+
+（2）技术点：
+
+①基础框架--ssm（SpringMVC+Spring+MyBatis）
+
+②数据库--MySql
+
+③前端框架--Bootstrap
+
+④项目的依赖管理--Maven
+
+⑤分页--pagehelper
+
+⑥逆向工程--MyBatis Generator
+
 ## 项目运行说明：（开发环境：MyEclipse2017 + Tomcat8.0）
 
 1、以Maven方式导入项目：Import -> Maven -> Existing maven project，选中项目导入。
@@ -42,38 +68,6 @@
 通过项目右键 run as --> maven build... --> main --> goals 中填入 tomcat8:deploy命令即可部署成功（遇到更多的部署方面的问题，可以参考：http://blog.csdn.net/u012052168/article/details/52448943）
 
 ## 开发过程记录：
-
-1、在记录过程之前，先列出总体的设计思路和一些需要注意的细节：
-
-（1）总体功能点：
-
-①分页
-
-②数据校验（jquery前端校验+JSR303后端校验）
-
-③ajax
-
-④Restful的URI：使用HTTP协议请求方式的动词来表示对资源的操作（GET--查询,POST--新增,PUT--修改,DELETE--删除）
-
-（2）技术点：
-
-①基础框架--ssm（SpringMVC+Spring+MyBatis）
-
-②数据库--MySql
-
-③前端框架--Bootstrap
-
-④项目的依赖管理--Maven
-
-⑤分页--pagehelper
-
-⑥逆向工程--MyBatis Generator
-
-（3）细节：
-
-<1>
-
-2、过程记录如下：
 
 （1）基础环境搭建：
 
@@ -362,7 +356,170 @@ departmentMapper.insertSelective(new Department(null, "测试部"));
 	
 ================截至目前为止，dao层基本完成====================
 
-（5）
+（5）首页要能够展示数据，做法如下：
+
+①访问index-2.jsp
+
+②index-2.jsp页面发送出查询员工列表请求：
+
+<jsp:forward page="/emps"></jsp:forward>
+
+③EmployeeController来接受请求，查处员工数据
+（相应的，在WEB-INF/views下创建一个list.jsp显示数据;还要创建EmployeeService类并编写相应的方法；
+里面还用到了PageHelper分页插件（要引入jar包，并在mybatis-config.xml中配置plugin节点））：
+
+@Controller
+public class EmployeeController {
+
+	@Autowired
+	EmployeeService employeeService;
+
+	@RequestMapping("/emps")
+	public String getEmps(
+			@RequestParam(value = "pn", defaultValue = "1") Integer pn,
+			Model model) {
+		// 这不是一个分页查询；
+		// 引入PageHelper分页插件
+		// 在查询之前只需要调用，传入页码，以及每页的大小
+		PageHelper.startPage(pn, 5);
+		// startPage后面紧跟的这个查询就是一个分页查询
+		List<Employee> emps = employeeService.getAll();
+		// 使用pageInfo包装查询后的结果，只需要将pageInfo交给页面就行了。
+		// 封装了详细的分页信息,包括有我们查询出来的数据，传入连续显示的页数(这里是5)
+		PageInfo page = new PageInfo(emps, 5);
+		model.addAttribute("pageInfo", page);
+
+		return "list";
+	}
+	
+写完上面的控制器代码之后不必急于显示到页面上看效果，而是应该编写Spring单元测试（crud.test包下的MvcTest类，注意Spring单元测试需要servlet3.0的jar包）：
+
+@RunWith(SpringJUnit4ClassRunner.class)
+@WebAppConfiguration
+@ContextConfiguration(locations = { "classpath:applicationContext.xml",
+		"file:src/main/webapp/WEB-INF/dispatcherServlet-servlet.xml" })
+public class MvcTest {
+	// 传入Springmvc的ioc
+	@Autowired
+	WebApplicationContext context;
+	// 虚拟mvc请求，获取到处理结果。
+	MockMvc mockMvc;
+
+	@Before
+	public void initMokcMvc() {
+		mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+	}
+
+	@Test
+	public void testPage() throws Exception {
+		//模拟请求拿到返回值
+		MvcResult result = mockMvc.perform(MockMvcRequestBuilders.get("/emps").param("pn", "5"))
+				.andReturn();
+		
+		//请求成功以后，请求域中会有pageInfo；我们可以取出pageInfo进行验证
+		MockHttpServletRequest request = result.getRequest();
+		PageInfo pi = (PageInfo) request.getAttribute("pageInfo");
+		System.out.println("当前页码："+pi.getPageNum());
+		System.out.println("总页码："+pi.getPages());
+		System.out.println("总记录数："+pi.getTotal());
+		System.out.println("在页面需要连续显示的页码");
+		int[] nums = pi.getNavigatepageNums();
+		for (int i : nums) {
+			System.out.print(" "+i);
+		}
+		
+		//获取员工数据
+		List<Employee> list = pi.getList();
+		for (Employee employee : list) {
+			System.out.println("ID："+employee.getEmpId()+"==>Name:"+employee.getEmpName());
+		}
+		
+	}
+
+}
+
+④跳转到了list.jsp页面进行展示：
+
+首先要注意web路径的写法（重点）：
+
+不以/开始的相对路径，找资源，以当前资源的路径为基准，经常容易出问题。
+
+以/开始的相对路径，找资源，以服务器的路径为标准(http://localhost:8080)；需要加上项目名
+		http://localhost:8080/crud
+		
+应用如下（APP_PATH的值是 /ssm_crud）：
+
+<%
+	pageContext.setAttribute("APP_PATH", request.getContextPath());
+%>
+
+<script type="text/javascript" src="${APP_PATH }/static/js/jquery-1.12.4.min.js"></script>
+
+详细代码见list.jsp，注意的问题：
+
+1>	用taglib引入jstl的core（用到<c:forEach>和<c:if>）
+
+2>	用到了PageInfo对象里的多个属性（如pages,hasNextPage等）
+
+（6）由于步骤（5）的做法只适用于B/S模型，若安卓或iOS发送请求也返回一个页面
+是不合适的，应改成返回json格式的数据，同时发送请求的方式改成ajax，步骤如下：
+
+①index.jsp页面（上一种查询方法是用index-2.jsp页面）直接发送ajax请求进行
+员工分页数据的查询
+
+②服务器将查出的数据，以json字符串的形式返回给浏览器（或者其它安卓等客户端，
+使用json可以实现客户端的无关性）
+
+③浏览器收到js字符串，可以使用js对json进行解析，并使用js通过dom增删改
+改变页面。
+
+具体实现过程如下：
+
+①修改EmployeeController类（使用@ResponseBody可以把方法返回的对象转成json字符串（要导入jackson包）），
+里面使用到了crud.bean包里的Msg类（注意add方法的写法是便于Msg的链式操作）。
+
+②编写index.jsp（发送ajax请求，解析返回的json数据，这里的重点是JQuery代码）
+
+（7）在index.jsp完成新增员工功能,步骤：
+
+①点击“新增”，弹出新增对话框（使用bootstrap的button的data-toggle属性和data-target属性以及bootstrap对应的模态框）
+（要保证字段的name属性名与JavaBean的属性名一一对应，SpringMVC才会把用户提交的数据自动封装成Employee对象）
+
+②去数据库查询部门列表，显示在对话框（应该在弹出模态框之前就要发送ajax请求，这里就要编写处理ajax请求的DepartmentController等类）
+
+③用户输入数据完成保存（模态框中的数据要提交到服务器保存（保存之前还要校验），编写EmployeeController的方法）
+
+注意URI的Rest风格：
+
+/emp/{id}	GET		查询员工
+
+/emp		POST	保存员工
+
+/emp/{id}	PUT		修改员工
+
+/emp/{id}	DELETE	删除员工
+
+补充：校验的方法如下（每个步骤都有很多细节）：
+
+①前端校验：正则表达式
+
+②姓名查重：在EmployeeController中使用EmployeeExample和Criteria
+等类
+
+③后台JSR303校验：
+
+1>	导入Hibernate-Validator包（注意tomcat6以及以下的服务器要额外给服务器的lib包中替换支持el的新标准的包）
+
+2>	在Employee类的属性上添加注解（如@Pattern，@Email等）
+
+3>	在EmployeeController的保存方法中添加参数：@Valid Employee employee和BindingResult result
+
+④数据库唯一约束（数据库创建约束使用户名不能重复）
+
+
+
+
+
 
 
 
